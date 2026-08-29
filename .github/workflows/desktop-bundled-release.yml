@@ -509,11 +509,26 @@ jobs:
       # makeappx + signtool live in the winCodeSign toolset that
       # electron-builder downloads into its cache during the build legs; the
       # msixbundle job runs on a fresh runner, so restore the same eb2 cache
-      # the win32 legs saved (keyed on the same electron/builder pins).
+      # the win32 legs saved. The path list MUST match the build legs'
+      # byte-for-byte — actions/cache derives the version hash from the paths
+      # input, so a shorter list computes a different version and the restore
+      # misses ("Cache not found") even with the identical key.
+      - name: Resolve electron's default download cache path
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Windows) echo "ELECTRON_DEFAULT_CACHE=$LOCALAPPDATA/electron/Cache" >> "$GITHUB_ENV" ;;
+            macOS)   echo "ELECTRON_DEFAULT_CACHE=$HOME/Library/Caches/electron" >> "$GITHUB_ENV" ;;
+            *)       echo "ELECTRON_DEFAULT_CACHE=$HOME/.cache/electron" >> "$GITHUB_ENV" ;;
+          esac
+
       - name: Cache electron + electron-builder toolchain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/.cache/electron-builder
+          path: |
+            ${{ github.workspace }}/.cache/electron-builder
+            ${{ github.workspace }}/.cache/electron
+            ${{ env.ELECTRON_DEFAULT_CACHE }}
           key: eb2-${{ runner.os }}-${{ runner.arch }}-electron-${{ steps.toolchain.outputs.electron }}-builder-${{ steps.toolchain.outputs.builder }}
           restore-keys: |
             eb2-${{ runner.os }}-${{ runner.arch }}-
