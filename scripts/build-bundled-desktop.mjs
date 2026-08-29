@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url'
 
 import { windowsFileVersion } from '../apps/desktop/scripts/windows-file-version.mjs'
 import { relativizePayloadLinks, stripFetchCache } from '../apps/desktop/scripts/materialize-payload-links.mjs'
+import { nightlyBuildMinutes } from './msix-shared.mjs'
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PAYLOAD_DIR = path.join(REPO_ROOT, 'apps', 'desktop', 'build', 'agent-payload')
@@ -362,7 +363,13 @@ stageCliShims(PAYLOAD_DIR, [
 const env = {
   ...process.env,
   HERMES_DESKTOP_VARIANT: variant,
-  HERMES_PAYLOAD_TAG: tag
+  HERMES_PAYLOAD_TAG: tag,
+  // The MSIX 4th version component is minutes-since-stable (see
+  // msix-shared.mjs). electron-builder reads BUILD_NUMBER for it when
+  // msix.setBuildNumber is on; a stable build leaves it unset and ships
+  // X.Y.Z.0. Computed here so the manifest, the .msixbundle /bv and the
+  // .appinstaller feed all agree (same derivation, same value).
+  ...(isNightly ? { BUILD_NUMBER: String(nightlyBuildMinutes(tag, REPO_ROOT)) } : {})
 }
 const desktop = path.join(REPO_ROOT, 'apps', 'desktop')
 

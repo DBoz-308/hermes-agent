@@ -2668,6 +2668,25 @@ def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/N
     return "\n".join(lines)
 
 
+def _nightly_timestamp(tag: str) -> str | None:
+    """The YYYYMMDD[HHMMSS] UTC stamp embedded in a nightly tag, or None."""
+    if not _NIGHTLY_TAG_RE.fullmatch(tag):
+        return None
+    return tag.split("-nightly.", 1)[1]
+
+
+def _stamp_epoch(stamp: str) -> int | None:
+    """Epoch seconds for a YYYYMMDD or YYYYMMDDHHMMSS UTC stamp."""
+    try:
+        if len(stamp) == 14:
+            return int(datetime.strptime(stamp, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).timestamp())
+        if len(stamp) == 8:
+            return int(datetime.strptime(stamp, "%Y%m%d").replace(tzinfo=timezone.utc).timestamp())
+    except ValueError:
+        pass
+    return None
+
+
 def cmd_nightly(args) -> None:
     """--nightly: tag + draft today's nightly prerelease.
 
@@ -2703,6 +2722,25 @@ def cmd_nightly(args) -> None:
         print(f"✓ {tag_name} already exists — nothing to do.")
         return
 
+    # The nightly MSIX build number is minutes-since-the-last-stable (see
+    # msix-shared.mjs). Two nightlies of the same LINE cut within the SAME
+    # minute would share a build number → identical MSIX version → App
+    # Installer refuses the second over the first. Refuse the second cut
+    # loudly instead of shipping an uninstallable equal-version package.
+    # (A same-minute cut on a NEW line — after a fresh stable — is fine: the
+    # patch bump already outversions the old line, so no collision.)
+    prev_ts = _nightly_timestamp(prev_nightly) if prev_nightly else None
+    same_line = bool(prev_nightly) and prev_nightly.split("-nightly.", 1)[0] == tag_name.split("-nightly.", 1)[0]
+    prev_min = _stamp_epoch(prev_ts) // 60 if prev_ts and _stamp_epoch(prev_ts) is not None else None
+    cur_min = _stamp_epoch(date_utc) // 60 if _stamp_epoch(date_utc) is not None else None
+    if same_line and prev_min is not None and prev_min == cur_min:
+        print(
+            f"✗ {tag_name} is in the same minute as {prev_nightly} — they would "
+            "share an MSIX build number (minutes since the last stable). Wait a "
+            "minute and re-run."
+        )
+        return
+
     if prev_nightly:
         head = git("rev-parse", "HEAD")
         if head and head == git("rev-parse", f"{prev_nightly}^{{commit}}"):
@@ -2713,6 +2751,23 @@ def cmd_nightly(args) -> None:
     if not commits:
         print(f"✓ No new commits since {since} — nothing to do.")
         return
+
+    # MSIX version components are 16-bit (makeappx rejects >65535). The
+    # nightly build number is minutes-since-the-last-stable, which crosses
+    # the cap at 45.5 days. A nightly cut on a stable base older than 45
+    # days cannot carry a legal build number — fail loudly, never clamp (a
+    # clamped number would break monotonicity and the update path).
+    stable_epoch = git("log", "-1", "--format=%ct", stable_tag)
+    nightly_epoch = _stamp_epoch(date_utc)
+    if stable_epoch.isdigit() and nightly_epoch is not None:
+        days_old = (nightly_epoch - int(stable_epoch)) / 86400
+        if days_old > 45:
+            print(
+                f"✗ {stable_tag} is {days_old:.1f} days old — a nightly cut now "
+                "would overflow the 16-bit MSIX build number (minutes since "
+                "this stable). Cut a stable release first."
+            )
+            sys.exit(1)
 
     version = tag_name.lstrip("v")
     print(f"Nightly: {tag_name} ({len(commits)} commits since {since})")

@@ -9,7 +9,10 @@ provides credentials.
 """
 
 import importlib.util
+from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 _RELEASE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "release.py"
 _SPEC = importlib.util.spec_from_file_location("hermes_release_nightly", _RELEASE_PATH)
@@ -68,8 +71,6 @@ class TestNightlyTagShape:
         try:
             from packaging.version import Version
         except ImportError:
-            import pytest
-
             pytest.skip("packaging not installed in this env")
         nightly = Version("0.27.5-nightly.20260818103000".replace("-nightly.", "a"))
         assert Version("0.27.4") < nightly < Version("0.27.5")
@@ -84,6 +85,93 @@ class TestNightlyDateStamps:
         stamped = release._NIGHTLY_TAG_RE.fullmatch("v0.27.1-nightly.20260801235959")
         assert legacy and legacy.group(0).split("-nightly.")[1][:8] == "20260801"
         assert stamped and stamped.group(0).split("-nightly.")[1][:8] == "20260801"
+
+
+class TestNightlyBuildNumberGuards:
+    """The MSIX nightly build number is minutes-since-the-last-stable.
+    Two nightlies of the same line cut in the same minute would share a
+    build number → identical MSIX version → App Installer refuses the
+    second. cmd_nightly refuses that; it also refuses a nightly whose
+    stable base is >45 days old (the 16-bit MSIX component would
+    overflow)."""
+
+    def test_same_minute_same_line_refused(self, monkeypatch, tmp_path):
+        import subprocess
+        from types import SimpleNamespace
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *a, **kw):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="url", stderr="")
+
+        def fake_git_result(*args, **kw):
+            # rev-parse --verify must MISS so we reach the guard, not the
+            # "tag already exists" short-circuit.
+            return subprocess.CompletedProcess(args, 1, "", "")
+
+        monkeypatch.setattr(release, "get_last_tag", lambda: "v0.27.1")
+        monkeypatch.setattr(release, "get_last_nightly_tag", lambda: "v0.27.2-nightly.20260818103045")
+        monkeypatch.setattr(release, "git_result", fake_git_result)
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
+        release.cmd_nightly(SimpleNamespace(date="20260818103000", publish=True, remote="origin"))
+        assert calls == [], "same-minute same-line re-cut must not create a release"
+
+    def test_same_minute_new_line_allowed(self, monkeypatch, tmp_path):
+        """A fresh stable bumps the line; a same-minute cut on the new line
+        outversions the old line by its patch component, so no collision."""
+        import subprocess
+        from types import SimpleNamespace
+
+        captured: list[list[str]] = []
+
+        def fake_run(cmd, *a, **kw):
+            captured.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="url", stderr="")
+
+        def fake_git_result(*args, **kw):
+            return subprocess.CompletedProcess(args, 1 if "rev-parse" in args else 0, "", "")
+
+        monkeypatch.setattr(release, "get_last_tag", lambda: "v0.28.0")
+        monkeypatch.setattr(release, "get_last_nightly_tag", lambda: "v0.27.2-nightly.20260818103045")
+        monkeypatch.setattr(release, "get_commits", lambda **kw: [{"hash": "a" * 40, "subject": "feat: x", "author": "e"}])
+        monkeypatch.setattr(release, "generate_changelog", lambda *a, **kw: "notes")
+        monkeypatch.setattr(release, "resolve_push_remote", lambda r: "origin")
+        monkeypatch.setattr(release, "remote_github_repo", lambda r: "o/r")
+        monkeypatch.setattr(release, "git", lambda *a, **kw: "1786017600" if a and a[0] == "log" else "")
+        monkeypatch.setattr(release, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(release.git_result, "__defaults__", ())
+        monkeypatch.setattr(release, "git_result", fake_git_result)
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
+        release.cmd_nightly(SimpleNamespace(date="20260818103000", publish=True, remote="origin"))
+        create = [c for c in captured if c[:3] == ["gh", "release", "create"]]
+        assert len(create) == 1, captured
+
+    def test_stable_base_older_than_45_days_refused(self, monkeypatch, tmp_path):
+        """Minutes-since-stable crosses the 16-bit MSIX component at 45.5
+        days; a nightly cut on an older stable cannot carry a legal build
+        number — refuse loudly (exit 1), never clamp."""
+        import subprocess
+        import sys
+        from types import SimpleNamespace
+
+        # Stable v0.27.1 committed 2026-07-01; nightly cut 2026-08-29.
+        old_epoch = str(int(datetime(2026, 7, 1, tzinfo=timezone.utc).timestamp()))
+        monkeypatch.setattr(release, "get_last_tag", lambda: "v0.27.1")
+        monkeypatch.setattr(release, "get_last_nightly_tag", lambda: None)
+        monkeypatch.setattr(release, "get_commits", lambda **kw: [{"hash": "a" * 40, "subject": "feat: x", "author": "e"}])
+        monkeypatch.setattr(release, "git", lambda *a, **kw: old_epoch if a and a[0] == "log" else "")
+        monkeypatch.setattr(release, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(release, "git_result", lambda *a, **kw: subprocess.CompletedProcess(a, 1, "", ""))
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
+        with pytest.raises(SystemExit) as exc:
+            release.cmd_nightly(SimpleNamespace(date="20260829000000", publish=True, remote="origin"))
+        assert exc.value.code == 1
 
 
 class TestNightlyIsDrafted:

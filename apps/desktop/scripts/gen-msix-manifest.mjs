@@ -27,6 +27,7 @@ import {
   splashScreenTag,
   substituteManifestMacros,
 } from "../../../node_modules/app-builder-lib/dist/targets/win/winAppUtil.js"
+import { appIdentity } from "../../../scripts/msix-shared.mjs"
 
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = path.resolve(desktop, "..", "..")
@@ -83,7 +84,10 @@ const manifest = substituteManifestMacros(template, (m) => {
   switch (m) {
     case "publisher": return options.publisher
     case "publisherDisplayName": return options.publisherDisplayName
-    case "version": return `${pkg.version}.0`
+    // Same 4-part derivation the real build uses (msix-shared::appIdentity) —
+    // a nightly shows its minutes-since-stable component here too, so this
+    // inspection tool never disagrees with what electron-builder shipped.
+    case "version": return appIdentity(desktop, process.env.HERMES_PAYLOAD_TAG).version
     case "applicationId": return resolvePackageApplicationId(options.applicationId, options.identityName, appInfoName, "MSIX")
     case "identityName": return resolvePackageIdentityName(options.identityName, appInfoName, "MSIX")
     case "executable": return executable

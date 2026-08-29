@@ -62,10 +62,14 @@ const channelDir = `releases/win32/${variant === 'light' ? 'light/' : ''}${chann
 
 const desktop = path.join(REPO_ROOT, 'apps', 'desktop')
 const releaseDir = path.join(desktop, 'release')
-const { identity, version, name } = appIdentity(desktop)
+const { identity, version, name, fileVersion } = appIdentity(desktop, tag)
 
+// Per-arch .msix files are found by the name electron-builder gave them
+// (appInfo.version = the 3-part or full-nightly string, NOT the 4-part feed
+// version). The bundle /bv, .appinstaller Version and feed filenames all use
+// the 4-part `version` — what Windows compares for updates.
 function msixFile(arch) {
-  return path.join(releaseDir, `${name}-${version}-win-${arch}.msix`)
+  return path.join(releaseDir, `${name}-${fileVersion}-win-${arch}.msix`)
 }
 function bundleFile() {
   return path.join(releaseDir, `${name}-${version}-win.msixbundle`)
