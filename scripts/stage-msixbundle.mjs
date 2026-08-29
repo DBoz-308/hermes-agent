@@ -43,6 +43,12 @@ const flagValue = (name) => {
 const tag = flagValue('--tag')
 const variant = flagValue('--variant') || process.env.HERMES_DESKTOP_VARIANT || 'bundled'
 
+// product-identity.cjs keys the app name off HERMES_DESKTOP_VARIANT — the
+// artifact filenames (HermesBundled-*-win-x64.msix) carry the bundled
+// identity, so the env var MUST match the variant or the msix lookup
+// fails. Set it before anything requires the identity.
+process.env.HERMES_DESKTOP_VARIANT = variant
+
 if (!tag) {
   console.error('[stage-msixbundle] --tag=<vX.Y.Z> is required')
   process.exit(1)
