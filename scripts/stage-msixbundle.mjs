@@ -92,17 +92,40 @@ function resolveWinSdkTools() {
     for (const entry of fs.readdirSync(root)) {
       const dir = path.join(root, entry)
       if (!fs.statSync(dir).isDirectory()) continue
-      // The nuget PACKAGE version (e.g. 10.0.26100.4948) is not the SDK BUILD
-      // the inner bin/<ver>/x64 folder carries — glob bin/*/x64 and require
-      // exactly one match (see the msix-packaging reference).
-      const binDir = path.join(dir, 'bin')
-      if (!fs.existsSync(binDir)) continue
-      for (const sub of fs.readdirSync(binDir)) {
-        const x64 = path.join(binDir, sub, 'x64')
-        if (fs.existsSync(path.join(x64, 'makeappx.exe')) && fs.existsSync(path.join(x64, 'signtool.exe'))) {
-          candidates.push(x64)
+      // Modern electron-builder (win-codesign@1.x): the Windows Kits bundle
+      // extracts to <cacheDir>/win-codesign@<ver>/windows-kits-bundle-10_0_26100_0-<hash>/,
+      // with the HOST tools (signtool.exe + makeappx.exe) directly in the
+      // x64/ subdir of the bundle folder — two levels under the winCodeSign
+      // root. Legacy winCodeSign-2.6.0 used windows-10/<arch>/ under the
+      // toolset dir; the old nuget layout bin/<ver>/x64/ is gone.
+      // Check every dir two levels down that carries a makeappx.exe + signtool.exe.
+      const toolDirs = []
+      for (const sub of fs.readdirSync(dir)) {
+        const subDir = path.join(dir, sub)
+        if (!fs.statSync(subDir).isDirectory()) continue
+        for (const arch of ['x64']) {
+          const x64 = path.join(subDir, arch)
+          if (fs.existsSync(path.join(x64, 'makeappx.exe')) && fs.existsSync(path.join(x64, 'signtool.exe'))) {
+            toolDirs.push(x64)
+          }
+        }
+        // Legacy: windows-10/x64 (winCodeSign-2.6.0)
+        const win10 = path.join(subDir, 'windows-10', 'x64')
+        if (fs.existsSync(path.join(win10, 'makeappx.exe')) && fs.existsSync(path.join(win10, 'signtool.exe'))) {
+          toolDirs.push(win10)
+        }
+        // Legacy nuget: bin/<ver>/x64
+        const binDir = path.join(subDir, 'bin')
+        if (fs.existsSync(binDir)) {
+          for (const bsub of fs.readdirSync(binDir)) {
+            const x64 = path.join(binDir, bsub, 'x64')
+            if (fs.existsSync(path.join(x64, 'makeappx.exe')) && fs.existsSync(path.join(x64, 'signtool.exe'))) {
+              toolDirs.push(x64)
+            }
+          }
         }
       }
+      candidates.push(...toolDirs)
     }
   }
   if (candidates.length === 0) {
@@ -166,6 +189,9 @@ if (process.env.AZURE_SIGN_ENDPOINT && process.env.AZURE_SIGN_ACCOUNT && process
 
 function resolveTrustedSigningDlib() {
   const roots = [
+    process.env.ELECTRON_BUILDER_CACHE
+      ? path.join(process.env.ELECTRON_BUILDER_CACHE, 'winCodeSign')
+      : '',
     path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache', 'winCodeSign'),
     path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'electron-builder', 'Cache', 'winCodeSign')
   ]
