@@ -237,6 +237,41 @@ def test_install_emits_staged_progress(pm_env):
     assert stages.index("download") < stages.index("unpack")
 
 
+def test_install_names_streams_progress(pm_env, capsys):
+    """The CLI install loop renders live download/unpack progress + a ✓
+    line per package, so a slow bundle run is never silent in a piped
+    log."""
+    from pm import cli
+
+    assert cli._install_names(["faketool"]) == 0
+    out = capsys.readouterr().out
+    assert "✓ faketool" in out
+    assert "faketool: 100.0%" in out
+    assert "faketool: unpacking" in out
+
+
+def test_install_names_labels_multi_archive(pm_env, capsys):
+    """A package split across archives gets a label on its progress lines,
+    so the log says which archive is moving."""
+    from pm import cli
+
+    lockfile_path, _, docroot, _ = pm_env
+    _, digest_a = make_tar(docroot, "multitool-1.0-a.tar.gz", {"bin/multitool": "#!a"})
+    _, digest_b = make_tar(docroot, "multitool-1.0-b.tar.gz", {"lib/extra.so": "y"})
+    lockfile = Lockfile(lockfile_path)
+    lockfile.set_pin("multitool", "1.0", {"any": [
+        {"url": f"{FakeTool.base_url}/multitool-1.0-a.tar.gz", "sha256": digest_a},
+        {"url": f"{FakeTool.base_url}/multitool-1.0-b.tar.gz", "sha256": digest_b},
+    ]})
+    lockfile.save()
+
+    assert cli._install_names(["multitool"]) == 0
+    out = capsys.readouterr().out
+    assert "multitool: unpacking 1/2" in out
+    assert "multitool: unpacking 2/2" in out
+    assert "✓ multitool" in out
+
+
 def test_download_ticks_per_chunk(pm_env, monkeypatch):
     """The raw download stream reports byte progress on every chunk so a
     slow line proves liveness."""

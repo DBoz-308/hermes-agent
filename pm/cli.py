@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from pm.ensure import _facts, _lockfile, _store, ensure
@@ -50,14 +52,43 @@ def cmd_lock(args) -> int:
     return 0
 
 
+def _fmt_bytes(n: int) -> str:
+    return f"{n / (1024 * 1024):.1f} MiB"
+
+
+def _live_progress(name: str):
+    """Per-package progress for ensure(): download as % + MiB, unpack as a
+    phase line. Throttled to ~4 MiB steps — a slow line proves it's moving
+    in a piped (CI) log without flooding it (a 1 MiB tick on a 1.5 GiB
+    model would be ~1,500 lines)."""
+    last = 0
+
+    def report(stage: str, done: int, total: int, label: str) -> None:
+        nonlocal last
+        if stage == "unpack":
+            last = 0
+            print(f"  {name}: unpacking{(' ' + label) if label else ''}", flush=True)
+            return
+        if total <= 0:
+            return
+        if done >= total or done - last >= 4 * 1024 * 1024:
+            last = done
+            print(
+                f"  {name}: {done / total * 100:5.1f}%  {_fmt_bytes(done)} / {_fmt_bytes(total)}",
+                flush=True,
+            )
+
+    return report
+
+
 def _install_names(names: list[str]) -> int:
     failed = 0
     for name in names:
         try:
-            ensure(name, explicit=True)
-            print(f"✓ {name}")
+            ensure(name, explicit=True, progress=_live_progress(name))
+            print(f"✓ {name}", flush=True)
         except InstallError as e:
-            print(f"✗ {e}")
+            print(f"✗ {e}", flush=True)
             failed += 1
     return failed
 
@@ -213,6 +244,40 @@ def cmd_gc(args) -> int:
     return 0
 
 
+def _run_live(cmd: list[str], *, cwd, env, timeout: int = 3600) -> tuple[int, str]:
+    """Run cmd with its output streamed through our stdout — a long uv
+    venv build must prove liveness in a piped (CI) log, not vanish until
+    exit — while still capturing the tail for the failure message. A
+    reader thread drains output so proc.wait(timeout) keeps the wall-clock
+    kill the old subprocess.run(timeout=) had. Returns (returncode, last
+    ~2k chars of combined output)."""
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True, bufsize=1, errors="replace",
+    )
+    tail = ""
+    lock = threading.Lock()
+
+    def drain() -> None:
+        nonlocal tail
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            with lock:
+                tail = (tail + line)[-2000:]
+
+    thread = threading.Thread(target=drain, daemon=True)
+    thread.start()
+    try:
+        code = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise RuntimeError(f"{cmd[0]} timed out after {timeout}s")
+    thread.join()
+    with lock:
+        return code, tail
+
+
 def cmd_bundle(args) -> int:
     """Stage a complete payload for THIS machine's target into --out:
     repo snapshot + store + facts (via the normal install path, redirected)
@@ -220,7 +285,6 @@ def cmd_bundle(args) -> int:
     uv.lock. Built natively per (os, arch); there is no cross-target
     staging."""
     import os
-    import subprocess
 
     from pm import paths
 
@@ -236,6 +300,7 @@ def cmd_bundle(args) -> int:
     if repo_dir.exists():
         shutil.rmtree(repo_dir)
     repo_dir.mkdir(parents=True)
+    print(f"staging repo snapshot ({ref})…", flush=True)
     archive = subprocess.run(
         ["git", "archive", "--format=tar", ref],
         cwd=paths.repo_root(), capture_output=True, timeout=600,
@@ -291,12 +356,10 @@ def cmd_bundle(args) -> int:
         [uv_bin, "venv", "--relocatable", "--python", str(python_bin), str(venv_dir)],
         [uv_bin, "sync", "--frozen", "--all-extras", "--active"],
     ):
-        proc = subprocess.run(
-            cmd, cwd=repo_dir, env=env,
-            capture_output=True, text=True, timeout=3600,
-        )
-        if proc.returncode != 0:
-            print(f"✗ venv: {' '.join(cmd[1:3])} failed:\n{proc.stderr[-2000:]}")
+        print(f"  venv: $ {' '.join(cmd)}", flush=True)
+        code, tail = _run_live(cmd, cwd=repo_dir, env=env)
+        if code != 0:
+            print(f"✗ venv: {' '.join(cmd[1:3])} failed:\n{tail}")
             return 1
     print("✓ venv (relocatable, all extras, on the staged interpreter)")
 
@@ -348,10 +411,12 @@ def _arch_guard(store_dir: Path) -> list[str]:
 
 def main(argv=None) -> int:
     # Windows consoles default to cp1252; pm prints ✓/✗. Never let the
-    # status glyphs crash the command reporting them.
+    # status glyphs crash the command reporting them. line_buffering:
+    # pm output must stream live in a piped (CI) log, not sit in a block
+    # buffer and flush only at exit.
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(errors="replace")
+            stream.reconfigure(errors="replace", line_buffering=True)
         except (AttributeError, OSError):
             pass
     parser = argparse.ArgumentParser(prog="hermes pm")
