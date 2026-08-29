@@ -147,7 +147,7 @@ function requiredEnv(name) {
   return value
 }
 
-function r2Headers(method, host, path, query, bodyHash, now, creds, contentType) {
+function r2Headers(method, host, path, query, bodyHash, now, creds, contentType, contentLength) {
   const headers = {
     host,
     'x-amz-date': now,
@@ -157,6 +157,9 @@ function r2Headers(method, host, path, query, bodyHash, now, creds, contentType)
   // added BEFORE the Authorization header is computed, so it lands in the
   // SigV4 canonical headers + SignedHeaders exactly like host / x-amz-*.
   if (contentType) headers['Content-Type'] = contentType
+  // Stream bodies (files >2GiB) need an explicit Content-Length — R2
+  // rejects a bodyless-length PUT with 411 MissingContentLength.
+  if (contentLength != null) headers['Content-Length'] = String(contentLength)
   headers.authorization = authHeader({
     method,
     host,
@@ -171,10 +174,10 @@ function r2Headers(method, host, path, query, bodyHash, now, creds, contentType)
   return headers
 }
 
-async function signedFetch(method, url, { body, bodyHash, creds, now, contentType }) {
+async function signedFetch(method, url, { body, bodyHash, creds, now, contentType, contentLength }) {
   const { host, pathname, search } = new URL(url)
   const query = search.replace(/^\?/, '')
-  const headers = r2Headers(method, host, pathname, query, bodyHash, now, creds, contentType)
+  const headers = r2Headers(method, host, pathname, query, bodyHash, now, creds, contentType, contentLength)
   const res = await fetch(url, {
     method,
     headers,
@@ -343,10 +346,12 @@ async function putObject(creds, base, bucket, key, filePath, now, contentType) {
     stream.on('end', () => resolve(hash.digest('hex')))
     stream.on('error', reject)
   })
-  const body = fs.createReadStream(filePath)
   const url = `${base}/${bucket}/${encodeKeyPath(key)}`
   await retry(async () => {
-    const { res, text } = await signedFetch('PUT', url, { body, bodyHash, creds, now, contentType })
+    // A fresh stream per attempt: a consumed ReadableStream cannot be
+    // replayed for the retry ("body object should not be disturbed").
+    const body = fs.createReadStream(filePath)
+    const { res, text } = await signedFetch('PUT', url, { body, bodyHash, contentLength: stat.size, creds, now, contentType })
     if (!res.ok) throw new Error(`PUT ${key} -> ${res.status}${text ? `: ${text.slice(0, 300)}` : ''}`)
   })
   const { res: headRes, text: headText } = await retry(async () => {
