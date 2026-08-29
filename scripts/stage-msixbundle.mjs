@@ -80,16 +80,19 @@ function bundleFile() {
 // cache; this job uses the SAME pin so makeappx/signtool match the builder's.
 function resolveWinSdkTools() {
   const candidates = []
-  // The workflow overrides ELECTRON_BUILDER_CACHE to the workspace cache, so
-  // the winCodeSign toolset (makeappx/signtool) lands there — check the env
-  // root first, then the default LOCALAPPDATA roots.
+  // electron-builder downloads its signing toolsets into the cache root
+  // (ELECTRON_BUILDER_CACHE on CI, %LOCALAPPDATA%/electron-builder/Cache
+  // by default) under `win-codesign@<ver>/` — there is NO `winCodeSign`
+  // subdir. The Windows Kits bundle extracts to
+  // win-codesign@<ver>/windows-kits-bundle-10_0_26100_0-<hash>/ with the
+  // HOST tools (signtool.exe + makeappx.exe) in its x64/ subdir. Legacy
+  // winCodeSign-2.6.0 used windows-10/<arch>/; the old nuget layout
+  // bin/<ver>/x64/ is long gone.
   const roots = [
-    process.env.ELECTRON_BUILDER_CACHE
-      ? path.join(process.env.ELECTRON_BUILDER_CACHE, 'winCodeSign')
-      : '',
-    path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache', 'winCodeSign'),
-    path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'cache', 'winCodeSign'),
-    path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'electron-builder', 'Cache', 'winCodeSign')
+    process.env.ELECTRON_BUILDER_CACHE || '',
+    path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache'),
+    path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'cache'),
+    path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'electron-builder', 'Cache')
   ]
   for (const root of roots) {
     if (!root || !fs.existsSync(root)) continue
@@ -99,10 +102,10 @@ function resolveWinSdkTools() {
       // Modern electron-builder (win-codesign@1.x): the Windows Kits bundle
       // extracts to <cacheDir>/win-codesign@<ver>/windows-kits-bundle-10_0_26100_0-<hash>/,
       // with the HOST tools (signtool.exe + makeappx.exe) directly in the
-      // x64/ subdir of the bundle folder — two levels under the winCodeSign
-      // root. Legacy winCodeSign-2.6.0 used windows-10/<arch>/ under the
-      // toolset dir; the old nuget layout bin/<ver>/x64/ is gone.
-      // Check every dir two levels down that carries a makeappx.exe + signtool.exe.
+      // x64/ subdir of the bundle folder — two levels under the cache root.
+      // Legacy winCodeSign-2.6.0 used windows-10/<arch>/ under the toolset
+      // dir; the old nuget layout bin/<ver>/x64/ is gone. Check every dir
+      // two levels down that carries a makeappx.exe + signtool.exe.
       const toolDirs = []
       for (const sub of fs.readdirSync(dir)) {
         const subDir = path.join(dir, sub)
@@ -129,7 +132,12 @@ function resolveWinSdkTools() {
           }
         }
       }
-      candidates.push(...toolDirs)
+      // First root with a usable kit wins — the configured
+      // ELECTRON_BUILDER_CACHE must beat any stray default cache.
+      if (toolDirs.length > 0) {
+        toolDirs.sort()
+        return toolDirs[toolDirs.length - 1]
+      }
     }
   }
   if (candidates.length === 0) {
@@ -193,11 +201,9 @@ if (process.env.AZURE_SIGN_ENDPOINT && process.env.AZURE_SIGN_ACCOUNT && process
 
 function resolveTrustedSigningDlib() {
   const roots = [
-    process.env.ELECTRON_BUILDER_CACHE
-      ? path.join(process.env.ELECTRON_BUILDER_CACHE, 'winCodeSign')
-      : '',
-    path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache', 'winCodeSign'),
-    path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'electron-builder', 'Cache', 'winCodeSign')
+    process.env.ELECTRON_BUILDER_CACHE || '',
+    path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache'),
+    path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'electron-builder', 'Cache')
   ]
   for (const root of roots) {
     if (!root || !fs.existsSync(root)) continue
