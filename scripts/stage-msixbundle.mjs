@@ -250,9 +250,11 @@ const appinstallerName = `${channel}.appinstaller`
 fs.writeFileSync(path.join(releaseDir, appinstallerName), appinstaller)
 
 const upload = (key, file, keyIsFull = false) => {
-  const buf = fs.readFileSync(file)
-  const sha = createHash('sha256').update(buf).digest('hex')
-  console.log(`[stage-msixbundle] upload ${key} (${buf.length} bytes, sha256 ${sha})`)
+  // NOTE: no fs.readFileSync here — the msixbundle can exceed Node's 2GiB
+  // buffer limit (ERR_FS_FILE_TOO_LARGE). r2-release.mjs put reads + hashes
+  // the file itself; log the size via stat instead.
+  const { size } = fs.statSync(file)
+  console.log(`[stage-msixbundle] upload ${key} (${size} bytes)`)
   // Feed-dir keys are FULL object keys (releases/win32/<ch>/…) — pass
   // --key-is-full so r2 put does NOT wrap them under releases/tag/<tag>/.
   // r2-release.mjs put derives Content-Type from the key extension.

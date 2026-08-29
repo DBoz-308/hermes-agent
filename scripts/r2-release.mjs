@@ -188,10 +188,6 @@ async function signedFetch(method, url, { body, bodyHash, creds, now, contentTyp
   return { res, text }
 }
 
-function sha256hex(buffer) {
-  return createHash('sha256').update(buffer).digest('hex')
-}
-
 async function retry(fn, tries = 3) {
   let lastError
   for (let attempt = 1; attempt <= tries; attempt++) {
@@ -333,11 +329,22 @@ export function rewriteFeedPaths(ymlText, absKey) {
 // Commands
 // ---------------------------------------------------------------------------
 
-async function putObject(creds, base, bucket, key, buffer, now, contentType) {
-  const bodyHash = sha256hex(buffer)
+async function putObject(creds, base, bucket, key, filePath, now, contentType) {
+  // Stream the body + hash from disk — the msixbundle is ~2.7GB and
+  // fs.readFileSync throws ERR_FS_FILE_TOO_LARGE past 2GiB. fetch() accepts
+  // a ReadableStream body; the hash is computed by streaming the same file.
+  const stat = await fs.promises.stat(filePath)
+  const bodyHash = await new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = fs.createReadStream(filePath)
+    stream.on('data', (c) => hash.update(c))
+    stream.on('end', () => resolve(hash.digest('hex')))
+    stream.on('error', reject)
+  })
+  const body = fs.createReadStream(filePath)
   const url = `${base}/${bucket}/${encodeKeyPath(key)}`
   await retry(async () => {
-    const { res, text } = await signedFetch('PUT', url, { body: buffer, bodyHash, creds, now, contentType })
+    const { res, text } = await signedFetch('PUT', url, { body, bodyHash, creds, now, contentType })
     if (!res.ok) throw new Error(`PUT ${key} -> ${res.status}${text ? `: ${text.slice(0, 300)}` : ''}`)
   })
   const { res: headRes, text: headText } = await retry(async () => {
@@ -346,11 +353,11 @@ async function putObject(creds, base, bucket, key, buffer, now, contentType) {
     return r
   })
   const remoteSize = headRes.headers.get('content-length')
-  if (remoteSize === null || String(remoteSize) !== String(buffer.length)) {
-    console.error(`::error::R2 HEAD ${key}: size mismatch (remote ${remoteSize}, local ${buffer.length})`)
+  if (remoteSize === null || String(remoteSize) !== String(stat.size)) {
+    console.error(`::error::R2 HEAD ${key}: size mismatch (remote ${remoteSize}, local ${stat.size})`)
     process.exit(1)
   }
-  console.log(`✓ r2: ${key} (${buffer.length} bytes)`)
+  console.log(`✓ r2: ${key} (${stat.size} bytes)`)
 }
 
 async function cmdPut({ tag, key, file, keyIsFull = false }) {
@@ -361,13 +368,9 @@ async function cmdPut({ tag, key, file, keyIsFull = false }) {
   const creds = { accessKeyId, secretKey }
   const base = s3Endpoint(accountId)
 
-  const buffer = fs.readFileSync(file)
   const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
-  // Feed-dir uploads (win32/<ch>/…, darwin/<ch>/…) pass the FULL object key
-  // (keyIsFull) so they land under releases/win32/…, NOT inside the immutable
-  // per-tag archive (releases/tag/<tag>/…).
   const keyPath = keyIsFull ? key : stagingKeyFor(tag, key)
-  await putObject(creds, base, bucket, keyPath, buffer, now, contentTypeFor(key))
+  await putObject(creds, base, bucket, keyPath, file, now, contentTypeFor(key))
 }
 
 /**
