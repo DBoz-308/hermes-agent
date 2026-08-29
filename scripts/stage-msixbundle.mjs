@@ -76,7 +76,13 @@ function bundleFile() {
 // cache; this job uses the SAME pin so makeappx/signtool match the builder's.
 function resolveWinSdkTools() {
   const candidates = []
+  // The workflow overrides ELECTRON_BUILDER_CACHE to the workspace cache, so
+  // the winCodeSign toolset (makeappx/signtool) lands there — check the env
+  // root first, then the default LOCALAPPDATA roots.
   const roots = [
+    process.env.ELECTRON_BUILDER_CACHE
+      ? path.join(process.env.ELECTRON_BUILDER_CACHE, 'winCodeSign')
+      : '',
     path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache', 'winCodeSign'),
     path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'cache', 'winCodeSign'),
     path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'electron-builder', 'Cache', 'winCodeSign')

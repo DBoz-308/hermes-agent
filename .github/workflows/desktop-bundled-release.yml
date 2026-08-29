@@ -465,6 +465,7 @@ jobs:
     timeout-minutes: 45
     env:
       HERMES_PAYLOAD_TAG: ${{ inputs.tag }}
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
       CLOUDFLARE_R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
       CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
       CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
@@ -480,6 +481,42 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.tag }}
+
+      - name: Resolve toolchain pins from pm/lock.json
+        id: pins
+        shell: bash
+        run: |
+          python -c '
+          import json
+          pkgs = json.load(open("pm/lock.json"))["packages"]
+          for tool in ("node", "npm", "uv"):
+              print(tool + "=" + pkgs[tool]["version"])
+          ' >> "$GITHUB_OUTPUT"
+
+      - name: Resolve toolchain cache key
+        id: toolchain
+        shell: bash
+        run: |
+          node -e '
+            const l = require("./package-lock.json")
+            const el = l.packages["apps/desktop/node_modules/electron"].version
+            const eb = l.packages["node_modules/electron-builder"].version
+            if (!el || !eb) process.exit(1)
+            console.log(`electron=${el}`)
+            console.log(`builder=${eb}`)
+          ' >> "$GITHUB_OUTPUT"
+
+      # makeappx + signtool live in the winCodeSign toolset that
+      # electron-builder downloads into its cache during the build legs; the
+      # msixbundle job runs on a fresh runner, so restore the same eb2 cache
+      # the win32 legs saved (keyed on the same electron/builder pins).
+      - name: Cache electron + electron-builder toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.cache/electron-builder
+          key: eb2-${{ runner.os }}-${{ runner.arch }}-electron-${{ steps.toolchain.outputs.electron }}-builder-${{ steps.toolchain.outputs.builder }}
+          restore-keys: |
+            eb2-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Download win legs' MSIX
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
