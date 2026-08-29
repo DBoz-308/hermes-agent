@@ -179,6 +179,8 @@ async function signedFetch(method, url, { body, bodyHash, creds, now, contentTyp
     method,
     headers,
     body: body ?? undefined,
+    // Stream bodies (files >2GiB) require the duplex option on Node's fetch.
+    ...(body != null && typeof body.pipe === 'function' ? { duplex: 'half' } : {}),
   })
   const text = await res.text()
   if (!res.ok) {
