@@ -543,14 +543,6 @@ jobs:
           path: apps/desktop/release
           merge-multiple: true
 
-      - name: Inspect the restored electron-builder cache
-        shell: bash
-        run: |
-          echo "== $ELECTRON_BUILDER_CACHE =="
-          find "$ELECTRON_BUILDER_CACHE" -maxdepth 4 -type f \( -name "makeappx.exe" -o -name "signtool.exe" -o -name "*.zip" -o -name "*.7z" \) 2>/dev/null | head -30
-          echo "== dirs =="
-          find "$ELECTRON_BUILDER_CACHE" -maxdepth 3 -type d 2>/dev/null | head -30
-
       - name: Azure login (OIDC)
         uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
         with:
