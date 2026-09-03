@@ -1,0 +1,11 @@
+name: autodev
+version: 0.1.0
+description: "AutoDev coordination tools — durable Hermes↔ChatGPT inbox, messages, acknowledgements, and help escalation through an external AutoDev control repository."
+author: DBoz-308
+kind: backend
+provides_tools:
+  - autodev_identity
+  - autodev_inbox
+  - autodev_send
+  - autodev_ack
+  - autodev_ask_chatgpt
