@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -109,6 +110,31 @@ def _run_autodev(*args: str, timeout_seconds: float = 30.0) -> Any:
         return {"raw_output": output}
 
 
+def _run_autodev_with_body(
+    command: list[str],
+    body: str,
+    *,
+    timeout_seconds: float = 30.0,
+) -> Any:
+    """Pass coordination content through a private temp file, not process argv."""
+
+    fd, path = tempfile.mkstemp(prefix="hermes-autodev-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        return _run_autodev(
+            *command,
+            "--body-file",
+            path,
+            timeout_seconds=timeout_seconds,
+        )
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
 def _handle_autodev_identity(args: dict, **kw) -> str:
     del args, kw
     config = _configuration()
@@ -168,7 +194,7 @@ def _handle_autodev_send(args: dict, **kw) -> str:
 
     message_id = str(args.get("message_id") or f"msg-{uuid.uuid4().hex}")
     try:
-        payload = _run_autodev(
+        command = [
             "remote-send",
             *_common_args(config),
             "--from-participant",
@@ -177,15 +203,14 @@ def _handle_autodev_send(args: dict, **kw) -> str:
             target,
             "--kind",
             kind,
-            "--body",
-            body,
             "--message-id",
             message_id,
             "--priority",
             priority,
             "--wake-policy",
             wake_policy,
-        )
+        ]
+        payload = _run_autodev_with_body(command, body)
         return tool_result(payload)
     except Exception as exc:
         return tool_error(f"AutoDev send failed: {type(exc).__name__}: {exc}")
@@ -249,8 +274,6 @@ def _handle_autodev_help(args: dict, **kw) -> str:
         config["participant_id"],
         "--chatgpt-participant",
         config["chatgpt_participant"],
-        "--body",
-        body,
         "--message-id",
         message_id,
         "--wake-id",
@@ -263,7 +286,7 @@ def _handle_autodev_help(args: dict, **kw) -> str:
         command.extend(["--fallback-at", fallback_at])
 
     try:
-        payload = _run_autodev(*command)
+        payload = _run_autodev_with_body(command, body)
         return tool_result(
             {
                 "queued": True,
