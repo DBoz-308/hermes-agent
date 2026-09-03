@@ -78,6 +78,8 @@ def test_help_tool_uses_durable_help_and_wake_ids(tmp_path):
     assert "hermes.worker-1" in argv
     assert "--chatgpt-participant" in argv
     assert "chatgpt.overseer" in argv
+    assert "--body-file" in argv
+    assert "Need a decision." not in argv
 
 
 def test_inbox_reports_pending_messages(tmp_path):
@@ -108,7 +110,7 @@ def test_send_rejects_unknown_message_kind(tmp_path):
                 }
             )
         )
-    assert result["error"] is True
+    assert "Unsupported AutoDev message kind" in result["error"]
 
 
 def test_ack_calls_remote_ack_with_explicit_id(tmp_path):
