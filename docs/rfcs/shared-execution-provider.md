@@ -1,376 +1,215 @@
-# RFC: Shared execution-provider substrate
+# RFC: Execution-effect intent boundary
 
-Status: proposed
+Status: **supersedes the earlier shared execution-provider ownership in this file**
 
 Date: 2026-09-05
 
 Related:
 
+- `DBoz-308/gatekeeper#12`
+- `DBoz-308/gatekeeper#13`
+- closed `DBoz-308/hermes-agent#4`
+- closed `DBoz-308/hermes-agent#5`
 - `DBoz-308/hermes-lab#25`
 - `DBoz-308/hermes-lab#20`
 - `DBoz-308/runner-fleet#26`
 - `DBoz-308/media-corpus#86`
 - `DBoz-308/media-corpus#88`
 
-## Problem
+## Correction
 
-Hermes-Lab has developed a capable provider-neutral runtime abstraction while proving strong isolated Hermes execution. A second concrete consumer now exists: Media Corpus MC-20 needs to execute a pinned Essentia qualification workload through strong isolation without granting its ordinary GitHub runner Docker-socket, root, provider-admin, or generic host-execution authority.
+The earlier version of this RFC incorrectly assigned generic execution-provider ownership to Hermes.
 
-That makes the generic execution semantics a shared Hermes substrate rather than a Hermes-Lab implementation detail or Runner-Fleet execution-cell responsibility.
+The corrected ecosystem law is:
 
-The shared substrate must be independently consumable by Hermes, Hermes-Lab, CI integrations, and future adapters. It must not require a non-Hermes workload to import Hermes-Lab scenario semantics.
+> **Hermes owns execution/effect intent. Gatekeeper alone owns concrete protected-effect adapters.**
 
-## Decision
+Hermes does not directly own or invoke OpenShell, NemoHermes, Docker/Podman, Incus/KVM, Firecracker/Fireactions, host filesystem materialization, provider credentials, provider acquisition, concrete exec/cancel/destroy operations or provider cleanup/reconciliation.
 
-Hermes defines a stable provider-neutral **execution substrate contract** with replaceable backend implementations.
+Those concrete interactions are Gatekeeper effects.
 
-The initial implementation may live inside the Hermes codebase as a bounded package/module/service surface. A new standalone repository is not required until packaging, privilege separation, deployment, or dependency pressure demonstrates that it is useful.
+The useful provider-neutral contract work from closed Hermes PRs #4 and #5 remains migration evidence for Gatekeeper. It is not an implementation candidate for Hermes.
 
-Hermes-Lab PR #20 is migration input, not the shared API itself.
+## Hermes ownership
 
-## Ownership
+Hermes owns:
 
-The shared execution substrate owns:
+- reasoning about whether a bounded execution/effect is needed;
+- session/delegation context;
+- semantic workload intent;
+- correlation between an execution request and the Hermes session/task that requested it;
+- interpretation of a returned Gatekeeper receipt for Hermes workflow purposes;
+- Hermes-specific semantic/runtime-control intent where a Hermes runtime itself is the subject.
 
-- execution request, provider, lease, lifecycle, and receipt contracts;
-- capability vocabulary and isolation floors;
-- immutable input/materialization requirements;
-- bounded writable work/output state;
-- network policy requirements;
-- resource and timeout requirements;
-- provider selection among explicitly configured providers;
-- acquired-lease validation;
-- timeout, cancel, release, destroy, and uncertain-cleanup semantics;
-- provider/profile/backend/runtime provenance;
-- stdout, stderr, exit status, and bounded output evidence;
-- replaceable adapters for NemoHermes/OpenShell, Incus/KVM, Firecracker/Fireactions, container substrates, and future providers.
-
-It does not own:
-
-- Hermes-Lab scenario definitions, perturbations, assertions, scoring, or experiment evidence;
-- Runner-Fleet physical-host placement, repository admission, runner lifecycle, or CI transport authority;
-- Wayfinder planning/task/context state;
-- DevAtlas development-estate authority;
-- Gatekeeper authorization policy;
-- application product acceptance semantics;
-- generic remote-machine administration.
-
-## Migration from Hermes-Lab PR #20
-
-The following PR #20 concepts are retained:
-
-- provider descriptor, current provider probe, and acquired lease are distinct evidence classes;
-- semantic requirements name capabilities, not provider products;
-- strong-isolation requirements cannot resolve to weaker leases;
-- persistence is explicit;
-- providers may implement multiple orthogonal capability ports;
-- arbitrary incomplete providers are never silently unioned;
-- explicit composite providers may exist behind one provider boundary;
-- acquired runtime facts are validated after effectful acquisition;
-- an acquisition that fails post-acquisition validation does not silently fall through to another provider;
-- cleanup uncertainty fails closed.
-
-The following PR #20 concepts remain Lab/Hermes-specific and are not copied into the generic core:
-
-- `RuntimeRequirements.hermes_artifact`;
-- Hermes control RPC, gateway restart, session semantics, and Hermes-specific capability names;
-- `hermes_lab.runtime_lease.v1`;
-- `hermes_lab.run_receipt.v2`;
-- Lab scenario assertions and fault semantics.
-
-Hermes control/runtime behavior becomes an extension layered over the generic execution lease.
-
-## Generic execution request v1
-
-A request identifies one bounded workload and the guarantees required to execute it.
-
-Minimum semantic fields:
+Hermes may define or consume a provider-neutral **intent vocabulary** describing requirements such as:
 
 ```text
-schema = hermes.execution.request.v1
-request_id
-workload
-required_capabilities
-preferred_capabilities
-isolation_floor
-persistence
-immutable_inputs
-work_policy
-output_policy
-network_policy
-resource_requirements
+workload identity
+required capability class
+isolation floor
+persistence requirement
+content-addressed input identities
+bounded output requirements
+network requirement
+resource ceilings
 timeout/deadline
-environment_policy
-secret_bindings
-evidence_requirements
+evidence requirements
 ```
 
-### Workload
+That vocabulary is not a provider API and does not grant machine authority.
 
-The workload is typed and bounded. It records enough exact identity to prove what was requested, for example:
+## Gatekeeper ownership
+
+Gatekeeper owns the concrete protected-effect boundary, including:
+
+- authority/grant/lease validation;
+- surface and execution-profile admission;
+- provider discovery that requires protected access;
+- provider/controller credential binding;
+- host/filesystem materialization;
+- concrete provider acquisition;
+- concrete exec/cancel/destroy operations;
+- process/container/VM/sandbox interaction;
+- exact applied isolation/network/resource evidence;
+- protected output extraction;
+- cleanup/reconciliation and uncertain-outcome handling;
+- authoritative Gatekeeper effect receipts.
+
+Execution substrates such as OpenShell or NemoHermes are addressed only through Gatekeeper-owned drivers/adapters.
+
+## No direct-provider law
+
+Hermes must not gain a second privileged-effect path merely because an execution backend has a convenient CLI or SDK.
+
+Normal Hermes agents must not receive:
+
+- Docker sockets;
+- OpenShell/provider administration credentials;
+- unrestricted sudo;
+- arbitrary host paths or mount primitives;
+- generic remote shell/SSH credentials;
+- provider-admin handles;
+- raw device access.
+
+The agent submits a bounded typed Gatekeeper effect request and consumes the bounded receipt/result.
+
+## Gatekeeper receipt relationship
+
+A Gatekeeper execution-effect receipt should be sufficient for Hermes to correlate and interpret the result without exposing provider authority.
+
+Useful evidence may include:
 
 ```text
-kind
-runtime/image/artifact identity
-entrypoint
-argv
-working-directory class
+Gatekeeper effect/request identity
+caller correlation ref
+exact workload/runtime identity
+admitted execution profile
+provider/backend provenance where safe
+applied isolation/network/resource facts
+exact content-addressed input/output identities
+bounded stdout/stderr/exit evidence
+timeout/cancel state
+cleanup/reconciliation state
+PASS / FAIL / ERROR / UNCERTAIN-style outcome facts
 ```
 
-The shared API is not an unrestricted host shell. Provider implementations may support bounded command execution inside provider-owned leases, but requests cannot select arbitrary host namespaces, arbitrary host mounts, arbitrary remote destinations, or provider-admin operations.
+Exact Gatekeeper schemas are owned and versioned by Gatekeeper, not Hermes.
 
-### Immutable inputs
-
-Each input has stable identity and intended presentation semantics, for example:
-
-```text
-input_id
-digest / exact artifact identity
-media/type metadata where needed
-presentation path inside the lease
-read_only = true
-```
-
-The source path on the physical host is not semantic identity and must not become a generic caller-selected host mount.
-
-### Work/output policy
-
-Requests bound writable state by provider-owned classes rather than arbitrary host paths. Bounds may include bytes, file count, directory count, runtime duration, and output allowlists.
-
-### Network policy
-
-Network is deny-by-default or explicitly bounded. `none` is a first-class policy. Service bindings are explicit capabilities rather than implicit LAN access.
-
-### Environment and secrets
-
-Only allowlisted environment fields enter the workload. Secret values are never embedded in request schemas or receipts; only opaque secret-binding identities may appear. Provider/controller credentials never enter the workload context.
-
-## Provider evidence model
-
-### ProviderDescriptor
-
-Static potential capability and compatibility metadata. It is not proof that the provider is currently usable.
-
-### ProviderProbe
-
-Current provider/controller availability evidence. It is still not proof of one acquired execution context.
-
-### ExecutionLease
-
-Facts about one acquired execution context.
-
-The lease must include at least:
-
-```text
-schema = hermes.execution.lease.v1
-request_id
-lease_id
-provider bindings
-actually acquired capabilities
-isolation level
-persistence mode
-materialized immutable inputs
-network policy applied
-work/output bounds
-owned-resource identity
-available ports
-metadata/provenance
-```
-
-A provider label, Runner-Fleet label, descriptor, or preflight probe may narrow candidates but cannot substitute for acquired-lease evidence.
-
-## Capability ports
-
-Prefer narrow ports over one provider god-object.
-
-Initial generic ports:
-
-```text
-ExecutionLifecyclePort
-FixtureTransferPort
-EvidencePort
-```
-
-Optional ports admitted only when a concrete provider/consumer needs them:
-
-```text
-SnapshotPort
-ServiceBindingPort
-InteractiveExecutionPort
-```
-
-Hermes-specific extensions may add:
-
-```text
-HermesRuntimePort
-HermesControlPort
-HermesLifecyclePort
-```
-
-One provider object may implement several ports. Explicit composite providers may delegate ports only across reviewed compatible boundaries while presenting one validated lease.
-
-## Resolution law
-
-Resolution follows these steps:
-
-```text
-request
- -> inspect explicitly configured provider descriptors
- -> probe candidates
- -> choose one eligible provider or one explicit composite provider
- -> acquire once
- -> validate acquired lease against request
- -> execute through lease ports
- -> collect bounded evidence
- -> release/destroy owned resources
- -> issue receipt
-```
-
-After effectful acquisition, validation failure does not cause automatic fallback to another provider. The first provider is released/destroyed; cleanup ambiguity produces an error/uncertain outcome.
-
-Automatic selection may prefer fewer composed components and preferred capabilities, but it cannot weaken a required capability or isolation floor.
-
-## Generic execution receipt v1
-
-Every attempted effectful execution should produce bounded evidence when possible.
-
-Minimum receipt fields:
-
-```text
-schema = hermes.execution.receipt.v1
-request_id
-lease_id
-execution_id
-outcome
-provider/profile/backend/runtime provenance
-exact workload identity
-exact immutable input identities
-isolation facts
-network facts
-timing / timeout / cancel state
-stdout/stderr/exit evidence
-output identities
-cleanup state
-degraded/diagnostic codes
-```
-
-Outcome must distinguish at least successful execution, workload failure, infrastructure/error failure, and uncertain state. Exact enum naming may be finalized in schema work, but cleanup ambiguity cannot be represented as clean success.
-
-Large output may be represented by bounded content-addressed references rather than unbounded inline text.
-
-## Security invariants
-
-The generic provider layer must not create a second remote-administration channel.
-
-Mandatory invariants:
-
-- no raw Docker socket to ordinary callers or workload contexts;
-- no unrestricted sudo;
-- no arbitrary host-path mount primitive;
-- no inherited operator home, browser/session state, SSH/GPG keys, or ambient environment;
-- no provider credential returned to callers or injected into workload state;
-- no generic SSH, host shell, arbitrary file-copy, port-forward, TCP proxy, or caller-selected network destination surface;
-- immutable inputs are exact and post-acquisition attested;
-- writable resources are provider-owned and bounded;
-- network access is denied or explicitly admitted;
-- destroy/release operations can affect only lease-owned resources;
-- timeout/cancel/interruption/cleanup uncertainty is explicit;
-- privileged provider administration is separately authorized and is not implied by execution access.
+Hermes-specific result objects may reference a Gatekeeper receipt; they do not alias Gatekeeper effect IDs or reinterpret uncertain cleanup as success.
 
 ## Runner-Fleet relationship
 
-Runner-Fleet remains responsible for physical execution-fleet and CI state:
+Runner-Fleet owns fleet semantics and desired state:
 
 ```text
 repository admission
-runner provisioning/lifecycle
-host capability observation
-host placement/routing
-CI transport/provider integration
+runner requirements
+host eligibility/placement
+scheduling/routing
+desired runner lifecycle
+fleet reconciliation meaning
 ```
 
-Runner-Fleet may verify that the shared provider client/profile is usable on a host and may expose that as verified eligibility. It may invoke a bounded client and collect its receipt for CI. It does not define isolation semantics or become the executor.
+It does not become the concrete host-I/O authority. Package installation, systemd/service mutation, protected checkout/runtime-file creation, runner registration and execution-substrate control are Gatekeeper effects under the corrected architecture.
 
-Host placement and execution-provider/profile/runtime selection remain separate decisions.
+Runner-Fleet may decide that an eligible host must expose a particular admitted Gatekeeper execution capability/profile. Gatekeeper performs the concrete effect; Runner-Fleet consumes the receipt and re-observes fleet state.
 
 ## Hermes-Lab relationship
 
-Hermes-Lab owns experiments. It consumes the shared execution substrate to obtain a validated lease and then applies Lab-owned fixture selection, perturbation, assertions, scenario evidence, comparison, and evaluation semantics.
+Hermes-Lab owns experiment/scenario/fixture-selection/perturbation/assertion/evaluation semantics.
 
-A Lab receipt may embed/reference a generic execution lease/receipt, but the generic receipt does not gain Lab scenario fields.
+It may request typed Gatekeeper runtime/filesystem/container/device effects and correlate Gatekeeper receipts into Lab evidence. It does not own the physical execution substrate or provider credential boundary.
 
-## Hermes relationship
+Hermes-Lab PR #20 remains valuable proving/migration evidence, especially its descriptor/probe/acquired-state distinction, fail-closed cleanup semantics and strong-provider tests. Concrete provider adapters from that work must migrate behind Gatekeeper rather than into Hermes core.
 
-Normal Hermes agent execution can use the generic substrate directly for bounded isolated jobs. Hermes-specific runtime/control ports extend the generic lease where a workload is itself a Hermes runtime.
+## Media Corpus MC-20 relationship
 
-Execution access does not imply Runner-Fleet administration or Gatekeeper bypass.
+Media Corpus owns corpus/artifact/provenance/qualification semantics.
 
-## Media Corpus MC-20 proving consumer
+For MC-20 it may submit a bounded isolated-execution intent to Gatekeeper and validate the returned domain output/receipt. Media Corpus must not import or invoke OpenShell, Docker or Gatekeeper driver internals.
 
-The first independent non-Hermes proving consumer is Media Corpus MC-20.
+The intended path is:
 
-MC-20 must be able to request execution of the exact pinned Essentia workload and validate evidence for:
+```text
+Media Corpus MC-20 qualification semantics
+        |
+        v
+bounded Gatekeeper execution-effect request
+        |
+        v
+Gatekeeper authority/admission + concrete driver
+        |
+        v
+OpenShell / later admitted substrate
+        |
+        v
+Gatekeeper effect receipt + bounded result
+        |
+        v
+Media Corpus validates domain qualification semantics
+```
 
-- exact request/lease/receipt linkage;
-- exact provider/profile/backend identity;
-- pinned Essentia runtime/image digest;
-- `network=none` equivalent;
-- exact immutable input presented read-only;
-- bounded writable work/output state;
-- no host Docker socket;
-- no unrestricted sudo or provider credential;
-- complete stdout/stderr/exit evidence;
-- bounded failed/interrupted/uncertain evidence;
-- cleanup ownership and result;
-- fail-closed behavior when required provider capability is unavailable.
+## Wayfinder / DevAtlas boundary
 
-Media Corpus must not implement the generic provider itself.
+Wayfinder remains planning/task/context state only.
 
-## Delivery slices
+DevAtlas owns development-domain repository/workspace/source/build/CI meaning and exact development-action preconditions. Protected Git/filesystem/provider effects are Gatekeeper operations.
 
-### E0 — contract freeze
+Neither semantic context nor a development capability descriptor authorizes itself.
 
-- generic request/lease/receipt schemas;
-- capability and isolation vocabulary;
-- generic ports;
-- resolver/acquired-lease validation law;
-- fake provider tests.
+## Migration evidence from the superseded design
 
-### E1 — real strong provider
+The following ideas from the superseded Hermes provider work remain useful when Gatekeeper defines its execution-effect surface:
 
-- adapt/bridge the already-developed NemoHermes/OpenShell path or another admitted strong provider;
-- prove exact immutable input, bounded network, execution evidence, and owned cleanup;
-- no Hermes-specific requirement in the generic path.
+- semantic requests name capabilities rather than provider products;
+- strong-isolation requirements cannot silently resolve to weaker acquired state;
+- content-addressed input/output identity;
+- explicit network requirements including deny-all/none;
+- bounded resources and output evidence;
+- descriptor/preflight claims are not acquired-effect evidence;
+- post-effect validation is required where applicable;
+- an effectful failure cannot silently fall through to another provider and execute twice;
+- cleanup uncertainty fails closed;
+- no arbitrary host mount, credential forwarding or generic remote-administration escape hatch.
 
-### E2 — CI consumer
+These are requirements on the Gatekeeper execution-effect/driver design, not a reason to restore a Hermes-owned provider layer.
 
-- bounded unprivileged CLI/API client;
-- Media Corpus MC-20 consumer proof;
-- Runner-Fleet capability/eligibility integration without execution ownership.
+## Current implementation status
 
-### E3 — Hermes-Lab migration
+Hermes has no accepted generic execution-provider implementation from this work.
 
-- Lab consumes shared generic substrate;
-- Lab-only scenario and receipt semantics remain local;
-- exact strong-provider acceptance continues to prove the real path.
+PRs #4 and #5 are closed unmerged. Their branches remain migration/reference evidence only.
 
-### E4 — Hermes-native extension
+Gatekeeper's accepted v0.1 runtime is still read-only. The corrected ownership law does not mean Gatekeeper already implements OpenShell/container execution; that work remains release-gated behind Gatekeeper's own architecture and acceptance process.
 
-- Hermes runtime/control ports layer over generic leases;
-- agents can request bounded isolated jobs without gaining provider-admin or fleet-admin authority.
+## Acceptance law for future Hermes integration
 
-## Acceptance
+Hermes-side execution integration is acceptable only when:
 
-The shared substrate is not accepted until:
-
-1. a non-Hermes fake workload executes without importing Hermes-Lab;
-2. strong-isolation requirements cannot resolve to a weaker acquired lease;
-3. exact immutable input attestation is checked after acquisition;
-4. provider descriptor/probe claims cannot substitute for lease evidence;
-5. effectful acquisition failure does not silently fall through to another provider;
-6. timeout/cancel/cleanup uncertainty is receipt-backed;
-7. ordinary callers have no Docker socket, unrestricted sudo, provider credential, arbitrary host mount, or generic remote-admin channel;
-8. MC-20 real qualification passes through the generic contract;
-9. Hermes-Lab consumes the same substrate without surrendering scenario/assertion ownership;
-10. Runner-Fleet can route/verify capability without becoming the generic executor;
-11. adding another provider implementation does not change consumer semantic schemas.
+1. the concrete effect is implemented and admitted through Gatekeeper;
+2. Hermes receives no provider/admin/host credential or raw concrete adapter;
+3. the Hermes request is bounded and typed rather than a generic privileged shell escape hatch;
+4. Gatekeeper receipt identity remains distinct from Hermes session/task identity;
+5. failure, timeout, cancellation and uncertain cleanup remain explicit;
+6. Hermes can consume the capability without knowing whether Gatekeeper used OpenShell, another local substrate or a governed remote endpoint;
+7. changing the concrete provider does not require rewriting Hermes semantic workflow logic.
